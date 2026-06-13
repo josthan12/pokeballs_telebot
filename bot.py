@@ -1,7 +1,5 @@
 import logging
-import requests
 import os
-import json
 
 from telegram import (
     Update,
@@ -12,24 +10,19 @@ from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
     ContextTypes,
+    CallbackQueryHandler,
+    MessageHandler,
+    filters,
 )
-from telegram.constants import ParseMode
-from typing import Final
-from telegram.ext import CallbackQueryHandler
-from telegram.ext import MessageHandler, filters
 from dotenv import load_dotenv
-from telegram.ext import CommandHandler, MessageHandler, filters
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
 
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ContextTypes
-
 # =========================
-# 📦 YOUR DATA (UNCHANGED)
+# 📦 DATA
 # =========================
 
 SWSHDIC_ENG = {
@@ -117,7 +110,6 @@ def format_inventory(set_name, set_data):
         lines.append(f"{item} - {qty}")
     return "\n".join(lines)
 
-
 def format_era_inventory(era_name, era_data):
     lines = [f"=== {era_name} Inventory ===", ""]
     for set_name in sorted(era_data):
@@ -128,21 +120,30 @@ def format_era_inventory(era_name, era_data):
     return "\n".join(lines)
 
 # =========================
-# 🧠 NAVIGATION STATE
+# 🧠 NAVIGATION HISTORY STACK
 # =========================
 
-def set_nav(context, value):
-    context.user_data["nav"] = value
+def push_nav(context, key):
+    context.user_data.setdefault("nav_history", []).append(key)
 
-def get_nav(context):
-    return context.user_data.get("nav", "language")
+def pop_nav(context):
+    history = context.user_data.get("nav_history", [])
+    return history.pop() if history else None
+
+def clear_nav(context):
+    context.user_data["nav_history"] = []
 
 # =========================
-# ⬅️ BACK BUTTON
+# ⬅️ BACK BUTTON HELPERS
 # =========================
 
 def back_btn():
     return InlineKeyboardMarkup([
+        [InlineKeyboardButton("⬅️ Back", callback_data="back")]
+    ])
+
+def with_back(buttons):
+    return InlineKeyboardMarkup(buttons + [
         [InlineKeyboardButton("⬅️ Back", callback_data="back")]
     ])
 
@@ -159,7 +160,7 @@ def language_menu():
     ])
 
 def eng_era_menu():
-    return InlineKeyboardMarkup([
+    return with_back([
         [
             InlineKeyboardButton("SV", callback_data="sv_eng"),
             InlineKeyboardButton("MEGA", callback_data="mega_eng"),
@@ -168,7 +169,7 @@ def eng_era_menu():
     ])
 
 def jap_era_menu():
-    return InlineKeyboardMarkup([
+    return with_back([
         [
             InlineKeyboardButton("SV", callback_data="sv_jap"),
             InlineKeyboardButton("MEGA", callback_data="mega_jap"),
@@ -188,12 +189,14 @@ def route(key):
     return wrapper
 
 # =========================
-# 🚀 ROUTES (MENUS)
+# 🚀 ROUTES
+# Each route pushes its OWN key before rendering,
+# so Back can pop it and re-call this same route.
 # =========================
 
 @route("Eng")
 async def eng(update, context):
-    set_nav(context, "language")
+    push_nav(context, "Eng")
     await update.callback_query.edit_message_text(
         "Please choose your era:",
         reply_markup=eng_era_menu()
@@ -201,87 +204,99 @@ async def eng(update, context):
 
 @route("Jap")
 async def jap(update, context):
-    set_nav(context, "language")
+    push_nav(context, "Jap")
     await update.callback_query.edit_message_text(
         "Please choose your era:",
         reply_markup=jap_era_menu()
     )
 
 @route("sv_eng")
-async def sv_eng(update, context):
-    set_nav(context, "era_eng")
-
-    keyboard = InlineKeyboardMarkup([
+async def sv_eng_route(update, context):
+    push_nav(context, "sv_eng")
+    keyboard = with_back([
         [InlineKeyboardButton("📋 Show All", callback_data="sv_eng_all")],
         [InlineKeyboardButton("Surging Sparks", callback_data="ss_eng")],
         [InlineKeyboardButton("Prismatic Evolutions", callback_data="pris_eng")],
         [InlineKeyboardButton("Destined Rivals", callback_data="dr_eng")],
         [InlineKeyboardButton("Paradox Rift", callback_data="pr_eng")],
         [InlineKeyboardButton("Temporal Forces", callback_data="tf_sv_eng")],
-        [InlineKeyboardButton("151", callback_data="151_eng")]
+        [InlineKeyboardButton("151", callback_data="151_eng")],
     ])
+    await update.callback_query.edit_message_text("Please choose a set:", reply_markup=keyboard)
 
-    await update.callback_query.edit_message_text(
-        "Please choose a set:",
-        reply_markup=keyboard
-    )
+@route("mega_eng")
+async def mega_eng_route(update, context):
+    push_nav(context, "mega_eng")
+    keyboard = with_back([
+        [InlineKeyboardButton("📋 Show All", callback_data="mega_eng_all")],
+        [InlineKeyboardButton("Ascended Heros", callback_data="ah_eng")],
+        [InlineKeyboardButton("Phantasmal Flames", callback_data="pf_eng")],
+    ])
+    await update.callback_query.edit_message_text("Please choose a set:", reply_markup=keyboard)
+
+@route("swsh_eng")
+async def swsh_eng_route(update, context):
+    push_nav(context, "swsh_eng")
+    keyboard = with_back([
+        [InlineKeyboardButton("📋 Show All", callback_data="swsh_eng_all")],
+        [InlineKeyboardButton("Fusion Strike", callback_data="fs_eng")],
+        [InlineKeyboardButton("Silver Tempest", callback_data="st_eng")],
+    ])
+    await update.callback_query.edit_message_text("Please choose a set:", reply_markup=keyboard)
+
+@route("sv_jap")
+async def sv_jap_route(update, context):
+    push_nav(context, "sv_jap")
+    keyboard = with_back([
+        [InlineKeyboardButton("📋 Show All", callback_data="sv_jap_all")],
+        [InlineKeyboardButton("Black Bolt", callback_data="bb_jap")],
+        [InlineKeyboardButton("White Flare", callback_data="wf_jap")],
+        [InlineKeyboardButton("Terrestial Festival ex", callback_data="tf_jap")],
+        [InlineKeyboardButton("Glory Of Team Rocket", callback_data="gotr_jap")],
+    ])
+    await update.callback_query.edit_message_text("Please choose a set:", reply_markup=keyboard)
 
 @route("mega_jap")
-async def mega_jap(update, context):
-    set_nav(context, "era_jap")
-
-    keyboard = InlineKeyboardMarkup([
+async def mega_jap_route(update, context):
+    push_nav(context, "mega_jap")
+    keyboard = with_back([
         [InlineKeyboardButton("📋 Show All", callback_data="mega_jap_all")],
         [InlineKeyboardButton("Mega Dream", callback_data="md_jap")],
         [InlineKeyboardButton("Mega Symphonia", callback_data="ms_jap")],
-        [InlineKeyboardButton("Mega Brave", callback_data="mb_jap")]
+        [InlineKeyboardButton("Mega Brave", callback_data="mb_jap")],
     ])
-
-    await update.callback_query.edit_message_text(
-        "Please choose a set:",
-        reply_markup=keyboard
-    )
+    await update.callback_query.edit_message_text("Please choose a set:", reply_markup=keyboard)
 
 # =========================
 # 📦 SET + ERA CALLBACK MAPS
 # =========================
 
 SET_CALLBACKS = {
-    "ss_eng": ("Surging Sparks", SVDIC_ENG["Sealed"]["Surging Sparks"]),
-    "pris_eng": ("Prismatic Evolution", SVDIC_ENG["Sealed"]["Prismatic Evolution"]),
-    "dr_eng": ("Destined Rivals", SVDIC_ENG["Sealed"]["Destined Rivals"]),
-    "pr_eng": ("Paradox Rift", SVDIC_ENG["Sealed"]["Paradox Rift"]),
-    "151_eng": ("151", SVDIC_ENG["Sealed"]["151"]),
-    "tf_sv_eng": ("Temporal Forces", SVDIC_ENG["Sealed"]["Temporal Forces"]),
-
-    "st_eng": ("Silver Tempest", SWSHDIC_ENG["SWSH"]["Sealed"]["Silver Tempest"]),
-    "fs_eng": ("Fusion Strike", SWSHDIC_ENG["SWSH"]["Sealed"]["Fusion Strike"]),
-
-    "ah_eng": ("Ascended Heros", MEGA_ENG["MEGA"]["Sealed"]["Ascended Heros"]),
-    "pf_eng": ("Phantasmal Flames", MEGA_ENG["MEGA"]["Sealed"]["Phantasmal Flames"]),
-
-    "bb_jap": ("Black Bolt", SVDIC_JAP["SV"]["Sealed"]["Black Bolt"]),
-    "wf_jap": ("White Flare", SVDIC_JAP["SV"]["Sealed"]["White Flare"]),
-    "gotr_jap": ("Glory of Team Rocket", SVDIC_JAP["SV"]["Sealed"]["GOTR"]),
-    "tf_jap": ("Terrestrial Festival ex", SVDIC_JAP["SV"]["Sealed"]["TF"]),
-
-    "md_jap": ("Mega Dream", MEGA_JAP["MEGA"]["Sealed"]["Mega Dream"]),
-    "ms_jap": ("Mega Symphonia", MEGA_JAP["MEGA"]["Sealed"]["Mega Symphonia"]),
-    "mb_jap": ("Mega Brave", MEGA_JAP["MEGA"]["Sealed"]["Mega Brave"]),
+    "ss_eng":     ("Surging Sparks",      SVDIC_ENG["Sealed"]["Surging Sparks"]),
+    "pris_eng":   ("Prismatic Evolution", SVDIC_ENG["Sealed"]["Prismatic Evolution"]),
+    "dr_eng":     ("Destined Rivals",     SVDIC_ENG["Sealed"]["Destined Rivals"]),
+    "pr_eng":     ("Paradox Rift",        SVDIC_ENG["Sealed"]["Paradox Rift"]),
+    "151_eng":    ("151",                 SVDIC_ENG["Sealed"]["151"]),
+    "tf_sv_eng":  ("Temporal Forces",     SVDIC_ENG["Sealed"]["Temporal Forces"]),
+    "st_eng":     ("Silver Tempest",      SWSHDIC_ENG["SWSH"]["Sealed"]["Silver Tempest"]),
+    "fs_eng":     ("Fusion Strike",       SWSHDIC_ENG["SWSH"]["Sealed"]["Fusion Strike"]),
+    "ah_eng":     ("Ascended Heros",      MEGA_ENG["MEGA"]["Sealed"]["Ascended Heros"]),
+    "pf_eng":     ("Phantasmal Flames",   MEGA_ENG["MEGA"]["Sealed"]["Phantasmal Flames"]),
+    "bb_jap":     ("Black Bolt",          SVDIC_JAP["SV"]["Sealed"]["Black Bolt"]),
+    "wf_jap":     ("White Flare",         SVDIC_JAP["SV"]["Sealed"]["White Flare"]),
+    "gotr_jap":   ("Glory of Team Rocket",SVDIC_JAP["SV"]["Sealed"]["GOTR"]),
+    "tf_jap":     ("Terrestrial Festival ex", SVDIC_JAP["SV"]["Sealed"]["TF"]),
+    "md_jap":     ("Mega Dream",          MEGA_JAP["MEGA"]["Sealed"]["Mega Dream"]),
+    "ms_jap":     ("Mega Symphonia",      MEGA_JAP["MEGA"]["Sealed"]["Mega Symphonia"]),
+    "mb_jap":     ("Mega Brave",          MEGA_JAP["MEGA"]["Sealed"]["Mega Brave"]),
 }
+
 ERA_CALLBACKS = {
-    "sv_eng_all": ("English SV", SVDIC_ENG["Sealed"]),
-    "swsh_eng_all": ("English SWSH", SWSHDIC_ENG["SWSH"]["Sealed"]),
-    "mega_eng_all": ("English MEGA", MEGA_ENG["MEGA"]["Sealed"]),
-    "sv_jap_all": ("Japanese SV", SVDIC_JAP["SV"]["Sealed"]),
-    "mega_jap_all": ("Japanese MEGA", MEGA_JAP["MEGA"]["Sealed"]),
-}
-ERA_PARENT = {
-    "sv_eng_all":   "sv_eng",
-    "swsh_eng_all": "swsh_eng",
-    "mega_eng_all": "mega_eng",
-    "sv_jap_all":   "sv_jap",
-    "mega_jap_all": "mega_jap",
+    "sv_eng_all":   ("English SV",      SVDIC_ENG["Sealed"]),
+    "swsh_eng_all": ("English SWSH",    SWSHDIC_ENG["SWSH"]["Sealed"]),
+    "mega_eng_all": ("English MEGA",    MEGA_ENG["MEGA"]["Sealed"]),
+    "sv_jap_all":   ("Japanese SV",     SVDIC_JAP["SV"]["Sealed"]),
+    "mega_jap_all": ("Japanese MEGA",   MEGA_JAP["MEGA"]["Sealed"]),
 }
 
 # =========================
@@ -290,81 +305,65 @@ ERA_PARENT = {
 
 async def handle_back(update, context):
     query = update.callback_query
-    nav = get_nav(context)
+    prev = pop_nav(context)
 
-    if nav == "era_view":
-        last_era = context.user_data.get("last_era", "")
-        parent = ERA_PARENT.get(last_era)
-        if parent and parent in ROUTES:
-            query.data = parent
-            await ROUTES[parent](update, context)
-            return
-        # Fallback if something goes wrong
-        await query.edit_message_text("Please choose your language:", reply_markup=language_menu())
-        set_nav(context, "language")
-        return
-
-    if nav == "set_view":
+    if prev is None:
+        # Stack is empty — we're at or behind the language screen
+        clear_nav(context)
         await query.edit_message_text(
-            "Please choose a set:",
-            reply_markup=eng_era_menu()
+            "Please choose your language:",
+            reply_markup=language_menu()
         )
-        set_nav(context, "era_eng")
         return
 
-    if nav == "era_eng":
-        await query.edit_message_text(
-            "Please choose your era:",
-            reply_markup=eng_era_menu()
-        )
-        set_nav(context, "language")
+    if prev in ROUTES:
+        # Pop it again before calling the route, because the route will
+        # push its own key when it renders — we don't want a duplicate.
+        await ROUTES[prev](update, context)
+        # The route just pushed `prev` again, which is correct —
+        # the stack now reflects the screen we're on.
         return
 
-    if nav == "era_jap":
-        await query.edit_message_text(
-            "Please choose your era:",
-            reply_markup=jap_era_menu()
-        )
-        set_nav(context, "language")
-        return
+    # Fallback
+    clear_nav(context)
+    await query.edit_message_text(
+        "Please choose your language:",
+        reply_markup=language_menu()
+    )
 
 # =========================
-# 🎯 MAIN HANDLER (ONLY ENTRY POINT)
+# 🎯 MAIN HANDLER
 # =========================
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
     query = update.callback_query
     await query.answer()
-
     data = query.data
 
-    # BACK
     if data == "back":
+        # Pop twice: once to undo the current screen's push,
+        # once to get the screen before it.
+        pop_nav(context)  # discard current screen
         await handle_back(update, context)
         return
 
-    # ROUTES (menus)
     if data in ROUTES:
         await ROUTES[data](update, context)
         return
 
-    # SET VIEW
     if data in SET_CALLBACKS:
         set_name, set_data = SET_CALLBACKS[data]
-        set_nav(context, "set_view")
-
+        # No push here — the set menu route already pushed itself.
+        # Back will pop the set menu key and return there correctly.
         await query.edit_message_text(
             text=format_inventory(set_name, set_data),
             reply_markup=back_btn()
         )
         return
 
-    # ERA VIEW
     if data in ERA_CALLBACKS:
         era_name, era_data = ERA_CALLBACKS[data]
-        set_nav(context, "era_view")
-
+        # Same — no push needed; set menu is already on the stack.
         await query.edit_message_text(
             text=format_era_inventory(era_name, era_data),
             reply_markup=back_btn()
@@ -376,12 +375,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # =========================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    set_nav(context, "language")
-
+    clear_nav(context)
     await update.message.reply_text(
-        "Please Choose a language:",
+        "Please choose a language:",
         reply_markup=language_menu()
     )
+
 # =========================
 # ❓ HELP COMMAND
 # =========================
@@ -424,7 +423,6 @@ async def unknown_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Use /start to browse the inventory or /help for assistance."
     )
 
-
 if __name__ == "__main__":
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
@@ -434,9 +432,3 @@ if __name__ == "__main__":
 
     print("Bot running...")
     app.run_polling()
-
-
-
-
-
-
