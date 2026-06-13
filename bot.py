@@ -1,5 +1,6 @@
 import logging
 import os
+import json
 
 from telegram import (
     Update,
@@ -15,11 +16,13 @@ from telegram.ext import (
     filters,
 )
 from dotenv import load_dotenv
+from telegram.error import Forbidden
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
 
 TOKEN = os.getenv("TELEGRAM_TOKEN")
+OWNER_ID = 888225106
 
 # =========================
 # 📦 DATA
@@ -393,6 +396,12 @@ Here's how to use this bot:
 📌 *Commands*
 - /start – Browse the inventory
 - /help – Show this help message
+- /subscribe – Subscribe to the newsletter
+- /unsubscribe – Unsubscribe from the newsletter
+
+📰 *Newsletter*
+- Subscribe to get market updates and stock news directly from me
+- Unsubscribe anytime, no questions asked
 
 🗂 *How to Browse*
 1. Use /start to begin
@@ -423,12 +432,132 @@ async def unknown_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Use /start to browse the inventory or /help for assistance."
     )
 
+# =========================
+# 📰 SUBSCRIBER HELPERS
+# =========================
+ 
+SUBSCRIBERS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "subscribers.json")
+ 
+def load_subscribers():
+    if not os.path.exists(SUBSCRIBERS_FILE):
+        return []
+    with open(SUBSCRIBERS_FILE, "r") as f:
+        content = f.read().strip()
+        if not content:
+            return []
+        data = json.loads(content)
+    return data.get("subscribers", [])
+ 
+def save_subscribers(subscribers):
+    """Save subscriber list to JSON file."""
+    with open(SUBSCRIBERS_FILE, "w") as f:
+        json.dump({"subscribers": subscribers}, f, indent=2)
+ 
+# =========================
+# 📰 NEWSLETTER COMMANDS
+# =========================
+ 
+async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    subscribers = load_subscribers()
+ 
+    if chat_id in subscribers:
+        await update.message.reply_text("You're already subscribed to the newsletter! 📬")
+        return
+ 
+    subscribers.append(chat_id)
+    save_subscribers(subscribers)
+    await update.message.reply_text(
+        "You're now subscribed to the newsletter! 🎉\n"
+        "You'll receive updates and market thoughts directly here.\n\n"
+        "Use /unsubscribe anytime to opt out."
+    )
+ 
+async def unsubscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    subscribers = load_subscribers()
+ 
+    if chat_id not in subscribers:
+        await update.message.reply_text("You're not currently subscribed. Use /subscribe to join!")
+        return
+ 
+    subscribers.remove(chat_id)
+    save_subscribers(subscribers)
+    await update.message.reply_text("You've been unsubscribed. Sorry to see you go! 👋\nUse /subscribe anytime to rejoin.")
+ 
+async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Only you can broadcast
+    if update.effective_chat.id != OWNER_ID:
+        await update.message.reply_text("You are not authorised to use this command.")
+        return
+ 
+    # Must provide a message: /broadcast <your message here>
+    if not context.args:
+        await update.message.reply_text(
+            "Please provide a message to broadcast.\n"
+            "Usage: /broadcast <your message>"
+        )
+        return
+ 
+    message = " ".join(context.args)
+    subscribers = load_subscribers()
+ 
+    if not subscribers:
+        await update.message.reply_text("No subscribers yet!")
+        return
+ 
+    newsletter_text = (
+        f"📬 *Pokesunshine Newsletter*\n\n"
+        f"{message}\n\n"
+        f"_To unsubscribe, send /unsubscribe_"
+    )
+ 
+    sent = 0
+    removed = []
+ 
+    for chat_id in subscribers:
+        try:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=newsletter_text,
+                parse_mode="Markdown"
+            )
+            sent += 1
+        except Forbidden:
+            # User has blocked the bot — remove them automatically
+            removed.append(chat_id)
+ 
+    # Clean up blocked users
+    if removed:
+        for chat_id in removed:
+            subscribers.remove(chat_id)
+        save_subscribers(subscribers)
+ 
+    summary = f"✅ Broadcast sent to {sent} subscriber(s)."
+    if removed:
+        summary += f"\n🚫 Removed {len(removed)} blocked user(s) from the list."
+ 
+    await update.message.reply_text(summary)
+ 
+async def subscriber_count(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Owner-only command to check how many subscribers you have."""
+    if update.effective_chat.id != OWNER_ID:
+        await update.message.reply_text("You are not authorised to use this command.")
+        return
+ 
+    subscribers = load_subscribers()
+    await update.message.reply_text(f"📊 You currently have {len(subscribers)} subscriber(s).")
+
 if __name__ == "__main__":
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, unknown_message))
+    app.add_handler(CommandHandler("subscribe", subscribe))
+    app.add_handler(CommandHandler("unsubscribe", unsubscribe))
+    app.add_handler(CommandHandler("broadcast", broadcast))
+    app.add_handler(CommandHandler("subscribers", subscriber_count))
 
     print("Bot running...")
     app.run_polling()
