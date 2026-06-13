@@ -702,7 +702,7 @@ Contact: @pokesunshine
 """
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(HELP_TEXT, parse_mode="MarkdownV2")
+    await update.message.reply_text(HELP_TEXT, parse_mode="Markdown")
 
 # =========================
 # 💬 UNKNOWN MESSAGE HANDLER
